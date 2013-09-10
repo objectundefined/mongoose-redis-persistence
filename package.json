@@ -1,0 +1,17 @@
+{
+  "name": "mongoose-redis-persistence",
+  "author": "objectundefined",
+  "main": "./index.js",
+  "author":"Gabriel Lipson",
+  "homepage":"https://github.com/objectundefined/mongoose-redis-persistence",
+  "repository":"git://github.com/objectundefined/mongoose-redis-persistence.git",
+  "dependencies": {
+    "mongoose": "*",
+    "clone": "*",
+    "redis": "*",
+    "msgpack": "~0.2.1",
+    "underscore": "~1.5.2",
+    "async": "~0.2.9"
+  },
+  "version": "0.0.1"
+}
