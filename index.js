@@ -166,7 +166,7 @@ Persistence.prototype.saveCache = function(doc,cb){
     
     var fieldIsUnique = checkFieldUnique( fieldName , model ) ;
     
-    var cacheKey = format('%s::%s::%s::%s' , modelName , fieldName , fieldIsUnique ? "UNIQUE" : doc._id , json[fieldName] ) ;
+    var cacheKey = format('%s::%s::%s::%s' , modelName , fieldName , fieldIsUnique ? "0" : doc._id , json[fieldName] ) ;
     
     return cacheKey ;
     
@@ -248,7 +248,7 @@ CacheQuery.prototype.exec = function ( cb ) {
       
       if ( fieldIsUnique ) {
         
-        var uniqueKey = format('%s::%s::%s::%s' , modelName , fieldName , "UNIQUE" , fieldEquals ) ;
+        var uniqueKey = format('%s::%s::%s::%s' , modelName , fieldName , "0" , fieldEquals ) ;
         
         cb ( null , [ uniqueKey ] ) ;
         
