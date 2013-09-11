@@ -4,16 +4,17 @@ var Persistence = require('./index') ;
 var _ = require('underscore') ;
 var async = require('async') ;
 var client = require('redis').createClient();
-var persistence = new Persistence({ cacheFields : ['user_number','_id'] , modelName : 'User' , client : client }) ;
-var UserSchema = mongoose.Schema({
+var persistence = exports.persistence = new Persistence({ cacheFields : ['user_number','_id'] , modelName : 'User' , client : client }) ;
+var UserSchema = exports.UserSchema = mongoose.Schema({
 	email : { type : String , unique : true , sparse : true , required : false } ,
   user_number : { type : Number , unique : true , required : true }
 });
 
 UserSchema.plugin( persistence.plugin() );
 
-var User = db.model('User',UserSchema) ;
+var User = exports.User = db.model('User',UserSchema) ;
 
+/*
 
 //User.updateWithCacheById( '522f964d6ba5e2af7a000001' , {email : 'gabbo'} , function(){console.log(arguments)} )
 
@@ -37,5 +38,14 @@ a.saveWithCache(function(err,a){
   });
   
 });
+
+*/
+
+User.findCached({ _id : { $in : ["522fdd21b922c4248f000001","522f8607e2b0e7ff75000001","522f8607e2b0e7ff75000065"]} },function(){console.log(arguments)})
+
+User.findCached({ _id : "522fdd21b922c4248f000001" },function(){console.log(arguments)})
+
+
+User.findOneCached({ _id : { $in : ["522fdd21b922c4248f000001","522f8607e2b0e7ff75000001","522f8607e2b0e7ff75000065"]} },function(){console.log(arguments)})
 
 
