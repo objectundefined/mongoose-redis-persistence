@@ -109,11 +109,12 @@ Persistence.prototype.plugin = function(schema){
       var args = _.toArray(arguments);
       var id = args.shift() ;
       var cb = args.pop() ;
+      var fields = args.pop() || null ;
       var opts = args.pop() || {} ;
-      opts.fields = args.pop() || null;
-
+      opts.fields = fields;
+      
       if ( id && _.isFunction(cb) ) {
-        persistence.findOne('_id',id,opts,cb);
+        _this.findOne('_id',id,opts,cb);
       }
 
     }
@@ -121,16 +122,17 @@ Persistence.prototype.plugin = function(schema){
     schema.statics.getFromCacheByIds = function(ids, fields, options, cb){
 
       var args = _.toArray(arguments);
-      var ids = args.shift() ;
+      var id = args.shift() ;
       var cb = args.pop() ;
+      var fields = args.pop() || null ;
       var opts = args.pop() || {} ;
-      opts.fields = args.pop() || null;
+      opts.fields = fields;
 
       if ( _.isArray( ids ) && _.isFunction(cb) ) {
     
         async.map( ids , function ( id , cb ) {
       
-          persistence.findOne('_id',id,opts,cb);
+          _this.findOne('_id',id,opts,cb);
       
         } , cb ) ;
     
@@ -164,9 +166,7 @@ Persistence.prototype.saveCache = function(doc,cb){
     
   }).map(function( fieldName ){
     
-    var fieldIsUnique = checkFieldUnique( fieldName , model ) ;
-    
-    var cacheKey = format('%s::%s::%s::%s' , modelName , fieldName , fieldIsUnique ? "0" : doc._id , json[fieldName] ) ;
+    var cacheKey = format('%s::%s::%s' , modelName , fieldName , json[fieldName] ) ;
     
     return cacheKey ;
     
@@ -185,21 +185,6 @@ Persistence.prototype.findOne = function ( fieldName , fieldEquals , opts , cb )
   var model = mongoose.models[this.modelName] ;
   var client = this.client ;
   var cb = _.last(arguments) ;
-  var cacheQuery = new CacheQuery( client , model , opts  ).where(fieldName,fieldEquals) ;
-  
-  cacheQuery.exec(cb);
-  
-};
-
-Persistence.prototype.find = function ( fieldName , fieldEquals , opts , cb ) {
-  
-  var model = mongoose.models[this.modelName] ;
-  var client = this.client ;
-  var cb = _.last(arguments) ;
-  var opts = opts || {} ;
-
-  opts.many = true ;
-  
   var cacheQuery = new CacheQuery( client , model , opts  ).where(fieldName,fieldEquals) ;
   
   cacheQuery.exec(cb);
@@ -237,64 +222,10 @@ CacheQuery.prototype.exec = function ( cb ) {
   var client = _this.client ;
   var Model = _this.Model ;
   var modelName = Model.modelName ;
-  var fieldIsUnique = checkFieldUnique( fieldName , Model ) ;
   var opts = _this.opts || {} ;
-  var many = opts.many ;
-  
-  
-  async.waterfall([
-    
-    function ( cb ) {
-      
-      if ( fieldIsUnique ) {
-        
-        var uniqueKey = format('%s::%s::%s::%s' , modelName , fieldName , "0" , fieldEquals ) ;
-        
-        cb ( null , [ uniqueKey ] ) ;
-        
-      } else {
-        
-        var keysQuery = format('%s::%s::%s::%s' , modelName , fieldName , "*" , fieldEquals ) ;
-        
-        client.keys( keysQuery , cb ) ;
-        
-      }
-      
-    },
-    
-    function ( keys , cb ) {
-      
-      if ( ! many ) {
-        
-        keys = keys.slice(0,1)
-        
-      }
-      
-      async.map( keys , function( key , cb ){
+  var key = format('%s::%s::%s' , modelName , fieldName , fieldEquals ) ;
 
-        execQuery( client , Model , key , opts || {} , cb )
-        
-      } , cb ) ;
-      
-    }
-    
-  ],function(err,results){
-    
-    if ( ! opts.many && results.length ) {
-      
-      cb( err , results[0] )
-      
-    } else if ( opts.many && results.length ) {
-      
-      cb( err , results ) ;
-      
-    } else {
-      
-      cb( err , results ) ;
-      
-    } 
-    
-  })
+  execQuery( client , Model , key , opts || {} , cb )
   
 }
 
@@ -305,7 +236,7 @@ function execQuery ( client , Model , query , opts , cb ) {
   async.waterfall([
     
     function ( cb ) {
-      
+
       client.hgetall( query , cb )
       
     },
@@ -378,19 +309,5 @@ function unserializeHash ( hash , fields ) {
   })
   
   return unserialized ;
-  
-}
-
-function checkFieldUnique ( field , model ) {
-  
-  if ( field == '_id' ) {
-    
-    return true ;
-    
-  } else {
-    
-    return !! ( model && model.schema && model.schema.tree && model.schema.tree[ field ] && model.schema.tree[ field ].unique ) ;
-    
-  }
   
 }
