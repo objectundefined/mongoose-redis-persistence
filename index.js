@@ -3,7 +3,6 @@ var _ = require('underscore') ;
 var format = require('util').format ;
 var msgpack = require('msgpack') ;
 var redis = require('redis') ;
-var client = redis.createClient() ;
 var async = require('async') ;
 
 
@@ -18,6 +17,8 @@ var Persistence = module.exports = function (options) {
   _this.autocache = !! options.autocache ;
   
   _this.modelName = options.modelName ;
+  
+  _this.client = options.client ;
   
   return _this ;
   
@@ -35,6 +36,7 @@ Persistence.prototype.plugin = function(schema){
       schema.post('save', _this.saveCache.bind(_this) );
       
     }
+    
     
     schema.methods.saveWithCache = function (cb) {
       
@@ -63,6 +65,79 @@ Persistence.prototype.plugin = function(schema){
       
     }
     
+    schema.statics.updateWithCacheById = function( condition , update, options, cb){
+  
+      var id = condition._id ;
+      var args = _.toArray(arguments);
+      var conditions = args.shift() ;
+      var update = args.shift() || {} ;
+      var cb = args.pop() ;
+      var opts = args.pop() || {} ;
+    
+      var Model = this  ;
+      
+      
+      if ( _.isFunction( cb ) ) {
+    
+        Model.update( condition , update , opts , function ( err , numAffected , results ) {
+    
+          if ( ! err ) {
+            
+            var doc = {}; 
+            
+            _.extend(doc,update,{_id : id})
+            
+            _this.saveCache( doc , function(){
+              
+              console.log('updated cache',arguments);
+              
+            })
+            
+          }
+          
+          cb( err , numAffected , results ) ;
+          
+        })
+        
+      }
+  
+  
+    }
+
+    schema.statics.getFromCacheById = function(id, fields, options, cb){
+  
+      var args = _.toArray(arguments);
+      var id = args.shift() ;
+      var cb = args.pop() ;
+      var opts = args.pop() || {} ;
+      opts.fields = args.pop() || null;
+
+      if ( id && _.isFunction(cb) ) {
+        persistence.findOne('_id',id,opts,cb);
+      }
+
+    }
+
+    schema.statics.getFromCacheByIds = function(ids, fields, options, cb){
+
+      var args = _.toArray(arguments);
+      var ids = args.shift() ;
+      var cb = args.pop() ;
+      var opts = args.pop() || {} ;
+      opts.fields = args.pop() || null;
+
+      if ( _.isArray( ids ) && _.isFunction(cb) ) {
+    
+        async.map( ids , function ( id , cb ) {
+      
+          persistence.findOne('_id',id,opts,cb);
+      
+        } , cb ) ;
+    
+      }
+
+    }
+    
   }
   
 }
@@ -71,9 +146,10 @@ Persistence.prototype.saveCache = function(doc,cb){
   
   var _this = this ;
   var modelName = this.modelName ;
-  var model = doc.model(doc.constructor.modelName);
+  var model = mongoose.models[modelName] ;
+  var client = this.client ;
   var cacheFields = this.cacheFields ;
-  var json = doc.toJSON({ depopulate: true }) ;
+  var json = _.isFunction(doc && doc.toJSON) ? doc.toJSON({ depopulate: true }) : doc ;
   var serialized = {} ;
   
   _.each( json , function ( val , k ) {
@@ -88,7 +164,7 @@ Persistence.prototype.saveCache = function(doc,cb){
     
   }).map(function( fieldName ){
     
-    var fieldIsUnique = _this.fieldIsUnique( fieldName , model ) ;
+    var fieldIsUnique = checkFieldUnique( fieldName , model ) ;
     
     var cacheKey = format('%s::%s::%s::%s' , modelName , fieldName , fieldIsUnique ? "UNIQUE" : doc._id , json[fieldName] ) ;
     
@@ -104,75 +180,125 @@ Persistence.prototype.saveCache = function(doc,cb){
 
 };
 
-Persistence.prototype.QueryField = function ( fieldName , many ) {
+Persistence.prototype.findOne = function ( fieldName , fieldEquals , opts , cb ) {
   
-  var _this = this ;
+  var model = mongoose.models[this.modelName] ;
+  var client = this.client ;
+  var cb = _.last(arguments) ;
+  var cacheQuery = new CacheQuery( client , model , opts  ).where(fieldName,fieldEquals) ;
   
-  return function ( keyEquals , cb ) {
-    
-    var Model = this ;
-    var modelName = Model.modelName ;
-    var fieldIsUnique = _this.fieldIsUnique( fieldName , Model ) ;
-    
-    async.waterfall([
-      
-      function ( cb ) {
-        
-        if ( fieldIsUnique ) {
-          
-          var uniqueKey = format('%s::%s::%s::%s' , modelName , fieldName , "UNIQUE" , keyEquals ) ;
-          
-          cb ( null , [ uniqueKey ] ) ;
-          
-        } else {
-          
-          var keysQuery = format('%s::%s::%s::%s' , modelName , fieldName , "*" , keyEquals ) ;
-          
-          client.keys( keysQuery , cb ) ;
-          
-        }
-        
-      },
-      
-      function ( keys , cb ) {
-        
-        if ( ! many ) {
-          
-          keys = keys.slice(0,1)
-          
-        }
-        
-        async.map( keys , function( key , cb ){
-          
-          _this.execQuery( Model , key , cb )
-          
-        } , cb ) ;
-        
-      },
-      
-      function ( results , cb ) {
-        
-        if ( ! many && results ) {
-          
-          cb( null , results[0] )
-          
-        } else {
-          
-          cb(null,results);
-          
-        }
-        
-      }
-      
-    ],cb)
-    
-  }
+  cacheQuery.exec(cb);
   
+};
+
+Persistence.prototype.find = function ( fieldName , fieldEquals , opts , cb ) {
+  
+  var model = mongoose.models[this.modelName] ;
+  var client = this.client ;
+  var cb = _.last(arguments) ;
+  var opts = opts || {} ;
+
+  opts.many = true ;
+  
+  var cacheQuery = new CacheQuery( client , model , opts  ).where(fieldName,fieldEquals) ;
+  
+  cacheQuery.exec(cb);
+  
+};
+
+
+function CacheQuery ( client , Model , opts ) {
+  
+  this.query = { fieldName : '' , fieldEquals : '' } ;
+  this.opts = opts || {} ;
+  this.Model = Model ;
+  this.client = client ;
+
+  return this ;
 //  console.log(this,Model);
   
 };
 
-Persistence.prototype.execQuery = function ( Model , query , cb ) {
+
+CacheQuery.prototype.where = function ( field , equals ) {
+  
+  this.query.fieldName = field ;
+  this.query.fieldEquals = equals ;
+  
+  return this ;
+  
+};
+
+CacheQuery.prototype.exec = function ( cb ) {
+  
+  var _this = this ;
+  var fieldName = _this.query.fieldName ;
+  var fieldEquals = _this.query.fieldEquals ;
+  var client = _this.client ;
+  var Model = _this.Model ;
+  var modelName = Model.modelName ;
+  var fieldIsUnique = checkFieldUnique( fieldName , Model ) ;
+  var opts = _this.opts || {} ;
+  var many = opts.many ;
+  
+  
+  async.waterfall([
+    
+    function ( cb ) {
+      
+      if ( fieldIsUnique ) {
+        
+        var uniqueKey = format('%s::%s::%s::%s' , modelName , fieldName , "UNIQUE" , fieldEquals ) ;
+        
+        cb ( null , [ uniqueKey ] ) ;
+        
+      } else {
+        
+        var keysQuery = format('%s::%s::%s::%s' , modelName , fieldName , "*" , fieldEquals ) ;
+        
+        client.keys( keysQuery , cb ) ;
+        
+      }
+      
+    },
+    
+    function ( keys , cb ) {
+      
+      if ( ! many ) {
+        
+        keys = keys.slice(0,1)
+        
+      }
+      
+      async.map( keys , function( key , cb ){
+
+        execQuery( client , Model , key , opts || {} , cb )
+        
+      } , cb ) ;
+      
+    }
+    
+  ],function(err,results){
+    
+    if ( ! opts.many && results.length ) {
+      
+      cb( err , results[0] )
+      
+    } else if ( opts.many && results.length ) {
+      
+      cb( err , results ) ;
+      
+    } else {
+      
+      cb( err , results ) ;
+      
+    } 
+    
+  })
+  
+}
+
+function execQuery ( client , Model , query , opts , cb ) {
   
   var _this = this ;
   
@@ -188,7 +314,7 @@ Persistence.prototype.execQuery = function ( Model , query , cb ) {
       
       if ( redisHash ) {
         
-        cb( null , _this.unserializeHash( redisHash ) )
+        cb( null , unserializeHash( redisHash , opts && opts.fields ) )
         
       } else {
         
@@ -202,18 +328,25 @@ Persistence.prototype.execQuery = function ( Model , query , cb ) {
       
       if ( unserialized ) {
         
-        var m = new Model();
+        if ( opts && opts.lean ) {
+          
+          cb( null , unserialized ) ;
+          
+        } else {
+          
+          var m = new Model();
       
-        m.init(unserialized);
+          m.init(unserialized);
         
-        cb( null , m ) ;
+          cb( null , m ) ;
+          
+        }
         
       } else {
         
         cb( null , null ) ;
         
       }
-      
       
     }
     
@@ -222,13 +355,25 @@ Persistence.prototype.execQuery = function ( Model , query , cb ) {
 }
 
 
-Persistence.prototype.unserializeHash = function ( hash ) {
+function unserializeHash ( hash , fields ) {
+  
   
   var unserialized = {} ;
   
-  _.each( hash , function ( packedVal , k ) {
+  _.each( hash , function ( packedVal , field ) {
     
-    unserialized[ k ] = JSON.parse(packedVal);//msgpack.unpack( new Buffer(packedVal) ) ;
+    var doUnserialize = 
+      
+      ( field == '_id' ) ||
+      ( ! fields ) || 
+      (_.isObject(fields) && fields[field] == 1 ) ||
+      (_.isArray(fields) && fields.length && fields.indexOf(field) !=-1 ) ;
+    
+    if ( doUnserialize ) {
+      
+      unserialized[ field ] = JSON.parse(packedVal);//msgpack.unpack( new Buffer(packedVal) ) ;
+      
+    }
     
   })
   
@@ -236,7 +381,7 @@ Persistence.prototype.unserializeHash = function ( hash ) {
   
 }
 
-Persistence.prototype.fieldIsUnique = function ( field , model ) {
+function checkFieldUnique ( field , model ) {
   
   if ( field == '_id' ) {
     
