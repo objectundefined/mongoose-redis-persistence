@@ -19,6 +19,8 @@ var Persistence = module.exports = function (options) {
   
   _this.client = options.client ;
   
+  _this.expireSeconds = options.expireSeconds || null ;
+  
   return _this ;
   
 };
@@ -90,9 +92,21 @@ Persistence.prototype.plugin = function(schema){
             
             _.extend(doc,update,{_id : id})
             
-            _this.saveCache( doc , function(){
+            _this.cacheExists( doc , function (err , exists ){
               
-              console.log('updated cache',arguments);
+              if ( exists ) {
+                
+                _this.saveCache( doc , function (err) {
+                  
+                  if ( ! err ) {
+                    
+                    console.log('updated cache for doc %s',doc._id);
+                    
+                  }
+                  
+                })
+                
+              }
               
             })
             
@@ -107,8 +121,6 @@ Persistence.prototype.plugin = function(schema){
   
     }
 
-    // Model.getFromCache({ user_number : 12345 },...)
-    
     schema.statics.findOneCached = function( queryObj , fields, options, cb){
   
       var args = _.toArray(arguments);
@@ -228,6 +240,7 @@ Persistence.prototype.saveCache = function(json,cb){
   var model = mongoose.models[modelName] ;
   var client = this.client ;
   var cacheFields = this.cacheFields ;
+  var expireSeconds = this.expireSeconds ;
   var serialized = {} ;
   
   _.each( json , function ( val , k ) {
@@ -250,7 +263,30 @@ Persistence.prototype.saveCache = function(json,cb){
   
   async.each( cachableFields , function ( k , cb ) {
     
-    client.hmset( k , serialized , cb );
+    async.series([
+      
+      function ( cb ) {
+        
+        client.hmset( k , serialized , cb );
+        
+      },
+      
+      function ( cb ) {
+        
+        if ( expireSeconds ) {
+          
+          client.expire( k , expireSeconds , cb );          
+        
+        } else {
+          
+          cb(null)
+          
+        }
+        
+      }
+        
+    ] , cb );
+    
     
   }, function(err){
     
@@ -259,6 +295,7 @@ Persistence.prototype.saveCache = function(json,cb){
     else {
     
       console.error( "error writing to cache: %s" , err ) ;
+      console.error("doc",json)
       
       cb( null , json )
       
@@ -267,6 +304,85 @@ Persistence.prototype.saveCache = function(json,cb){
   })
 
 };
+
+Persistence.prototype.cacheExists = function(json,cb){
+  
+  var _this = this ;
+  var modelName = this.modelName ;
+  var model = mongoose.models[modelName] ;
+  var client = this.client ;
+  var cacheFields = this.cacheFields ;
+  
+  var cachableFields = cacheFields.map(function( fieldName ){
+    
+    var cacheKey = format('%s::%s::%s' , modelName , fieldName , json[fieldName] ) ;
+    
+    return cacheKey ;
+    
+  });
+  
+  async.map( cachableFields , function ( k , cb ) {
+
+    client.type( k , cb );
+
+  }, function ( err , results ) {
+
+    if ( ! err ) {
+
+      var cacheExists = _.every( results , function ( result ) { return result == "hash" }) ;
+
+      cb( null , cacheExists ) ; 
+
+    } else {
+
+      console.error( "error checking to cache: %s" , err ) ;
+
+      cb( null , false )
+
+    }
+
+  });
+
+};
+
+Persistence.prototype.flushCache = function(json,cb){
+  
+  var _this = this ;
+  var modelName = this.modelName ;
+  var model = mongoose.models[modelName] ;
+  var client = this.client ;
+  var cacheFields = this.cacheFields ;
+  
+  var cachableFields = cacheFields.map(function( fieldName ){
+    
+    var cacheKey = format('%s::%s::%s' , modelName , fieldName , json[fieldName] ) ;
+    
+    return cacheKey ;
+    
+  });
+  
+  async.each( cachableFields , function ( k , cb ) {
+
+    client.del( k , cb );
+
+  }, function ( err ) {
+
+    if ( ! err ) {
+
+      cb( null , true ) ; 
+
+    } else {
+
+      console.error( "error checking to cache: %s" , err ) ;
+
+      cb( null , false )
+
+    }
+
+  });
+
+};
+
 
 Persistence.prototype._findOne = function ( fieldName , fieldEquals , opts , cb ) {
   

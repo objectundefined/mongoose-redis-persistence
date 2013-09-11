@@ -48,4 +48,16 @@ User.findCached({ _id : "522fdd21b922c4248f000001" },function(){console.log(argu
 
 User.findOneCached({ _id : { $in : ["522fdd21b922c4248f000001","522f8607e2b0e7ff75000001","522f8607e2b0e7ff75000065"]} },function(){console.log(arguments)})
 
+persistence.flushCache({ user_number: 12342092, _id: "522fdd21b922c4248f000001" } , function (err,flushed){
+  
+  persistence.cacheExists({ user_number: 12342092, _id: "522fdd21b922c4248f000001" } , function (){
+    console.log('cacheExists',arguments)
+  })
+  
+})
 
+User.updateWithCache({ user_number: 12342092, _id: "522fdd21b922c4248f000001" },{ email : "foo@foo.foo" } , function (){
+  
+  console.log(arguments);
+  
+});
