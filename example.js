@@ -4,7 +4,7 @@ var Persistence = require('./index') ;
 var _ = require('underscore') ;
 var async = require('async') ;
 var client = require('redis').createClient();
-var persistence = exports.persistence = new Persistence({ cacheFields : ['user_number','_id'] , modelName : 'User' , client : client }) ;
+var persistence = exports.persistence = new Persistence({ cacheFields : ['user_number','_id'] , expireSeconds : 10 , client : client }) ;
 var UserSchema = exports.UserSchema = mongoose.Schema({
 	email : { type : String , unique : true , sparse : true , required : false } ,
   user_number : { type : Number , unique : true , required : true }
@@ -48,9 +48,12 @@ User.findCached({ _id : "522fdd21b922c4248f000001" },function(){console.log(argu
 
 User.findOneCached({ _id : { $in : ["522fdd21b922c4248f000001","522f8607e2b0e7ff75000001","522f8607e2b0e7ff75000065"]} },function(){console.log(arguments)})
 
-persistence.flushCache({ user_number: 12342092, _id: "522fdd21b922c4248f000001" } , function (err,flushed){
+
+/*
+
+persistence.flushCache(User,{ user_number: 12342092, _id: "522fdd21b922c4248f000001" } , function (err,flushed){
   
-  persistence.cacheExists({ user_number: 12342092, _id: "522fdd21b922c4248f000001" } , function (){
+  persistence.cacheExists(User,{ user_number: 12342092, _id: "522fdd21b922c4248f000001" } , function (){
     console.log('cacheExists',arguments)
   })
   
@@ -61,3 +64,5 @@ User.updateWithCache({ user_number: 12342092, _id: "522fdd21b922c4248f000001" },
   console.log(arguments);
   
 });
+
+*/

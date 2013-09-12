@@ -15,8 +15,6 @@ var Persistence = module.exports = function (options) {
   
   _this.autocache = !! options.autocache ;
   
-  _this.modelName = options.modelName ;
-  
   _this.client = options.client ;
   
   _this.expireSeconds = options.expireSeconds || null ;
@@ -36,7 +34,8 @@ Persistence.prototype.plugin = function(schema){
       
       schema.post('save', function(){
         var doc = this.toJSON({ depopulate: true })
-        _this.saveCache.apply(_this,[doc])
+        var Model = this.model(this.constructor.modelName);
+        _this.saveCache.apply(_this,[Model,doc])
         
       } );
       
@@ -46,7 +45,7 @@ Persistence.prototype.plugin = function(schema){
     schema.methods.saveWithCache = function (cb) {
       
       var doc = this ;
-      
+      var Model = this.model(this.constructor.modelName);
       async.waterfall([
         
         function ( cb ) {
@@ -57,7 +56,34 @@ Persistence.prototype.plugin = function(schema){
         
         function ( doc , numAffected , cb ) {
           
-          _this.saveCache(doc.toJSON({ depopulate: true }),function(err){
+          _this.saveCache(Model,doc.toJSON({ depopulate: true }),function(err){
+            if ( ! err ) {
+              cb(null,doc,numAffected);
+            } else {
+              cb(err)
+            }
+          });
+        }
+        
+      ],cb)
+      
+    }
+    
+    schema.methods.flushCache = function (cb) {
+      
+      var doc = this ;
+      var Model = this.model(this.constructor.modelName);
+      async.waterfall([
+        
+        function ( cb ) {
+          
+          doc.save(cb);
+          
+        },
+        
+        function ( doc , numAffected , cb ) {
+          
+          _this.saveCache(Model,doc.toJSON({ depopulate: true }),function(err){
             if ( ! err ) {
               cb(null,doc,numAffected);
             } else {
@@ -92,11 +118,11 @@ Persistence.prototype.plugin = function(schema){
             
             _.extend(doc,update,{_id : id})
             
-            _this.cacheExists( doc , function (err , exists ){
+            _this.cacheExists( Model , doc , function (err , exists ){
               
               if ( exists ) {
                 
-                _this.saveCache( doc , function (err) {
+                _this.saveCache( Model , doc , function (err) {
                   
                   if ( ! err ) {
                     
@@ -129,6 +155,7 @@ Persistence.prototype.plugin = function(schema){
       var fields = args.shift() || null ;
       var opts = args.shift() || {} ;
       var fieldName , fieldVal ;
+      var Model = this ;
       opts.fields = fields;
       
       _.each( queryObj , function ( v , k ) {
@@ -145,7 +172,7 @@ Persistence.prototype.plugin = function(schema){
 
       if ( fieldName && fieldVal && _.isFunction(cb) ) {
       
-        _this._findOne( fieldName , fieldVal ,opts,cb);
+        _this._findOne( Model , fieldName , fieldVal ,opts,cb);
       
       } else if ( _.isFunction(cb) ) {
         
@@ -164,6 +191,8 @@ Persistence.prototype.plugin = function(schema){
       var fields = args.shift() || null ;
       var opts = args.shift() || {} ;
       var fieldName , fieldVals ;
+      var Model = this ;
+      
       opts.fields = fields;
       
       _.each( queryObj , function ( v , k ) {
@@ -182,7 +211,7 @@ Persistence.prototype.plugin = function(schema){
         
         async.map( fieldVals , function ( fieldVal , cb ){
           
-          _this._findOne( fieldName , fieldVal ,opts,cb);
+          _this._findOne( Model , fieldName , fieldVal ,opts,cb);
           
         } , function ( err , docs ) {
           
@@ -233,11 +262,10 @@ Persistence.prototype.plugin = function(schema){
   
 }
 
-Persistence.prototype.saveCache = function(json,cb){
+Persistence.prototype.saveCache = function( Model , json , cb ){
   
   var _this = this ;
-  var modelName = this.modelName ;
-  var model = mongoose.models[modelName] ;
+  var modelName = Model.modelName ;
   var client = this.client ;
   var cacheFields = this.cacheFields ;
   var expireSeconds = this.expireSeconds ;
@@ -305,11 +333,10 @@ Persistence.prototype.saveCache = function(json,cb){
 
 };
 
-Persistence.prototype.cacheExists = function(json,cb){
+Persistence.prototype.cacheExists = function(Model,json,cb){
   
   var _this = this ;
-  var modelName = this.modelName ;
-  var model = mongoose.models[modelName] ;
+  var modelName = Model.modelName ;
   var client = this.client ;
   var cacheFields = this.cacheFields ;
   
@@ -345,11 +372,10 @@ Persistence.prototype.cacheExists = function(json,cb){
 
 };
 
-Persistence.prototype.flushCache = function(json,cb){
+Persistence.prototype.flushCache = function(Model,json,cb){
   
   var _this = this ;
-  var modelName = this.modelName ;
-  var model = mongoose.models[modelName] ;
+  var modelName = Model.modelName ;
   var client = this.client ;
   var cacheFields = this.cacheFields ;
   
@@ -384,9 +410,8 @@ Persistence.prototype.flushCache = function(json,cb){
 };
 
 
-Persistence.prototype._findOne = function ( fieldName , fieldEquals , opts , cb ) {
+Persistence.prototype._findOne = function ( Model , fieldName , fieldEquals , opts , cb ) {
   
-  var Model = mongoose.models[this.modelName] ;
   var client = this.client ;
   var cb = _.last(arguments) ;
   var _this = this ;
@@ -416,7 +441,7 @@ Persistence.prototype._findOne = function ( fieldName , fieldEquals , opts , cb 
           
           if ( doc ) {
             
-            _this.saveCache( doc , cb )
+            _this.saveCache( Model , doc , cb )
             
           } else {
             
